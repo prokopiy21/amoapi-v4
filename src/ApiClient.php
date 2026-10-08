@@ -14,6 +14,7 @@ if (!defined('AMOV4API_ROOT')) {
  * @property \Ufee\AmoV4\Api\Oauth $oauth
  * @property \Ufee\AmoV4\Api\Cache $cache
  * @property string $client_id
+ * @property string $instance_key
  *
  * @method \Ufee\AmoV4\Services\Account account(...$args)
  * @method \Ufee\AmoV4\Services\Users users(...$args)
@@ -46,6 +47,8 @@ class ApiClient
 {
 	/** Fallback timezone if account datetime_settings are not available */
 	public const DEFAULT_TIMEZONE = 'Europe/Moscow';
+	/** Лимит экземпляров в процессе, старейший вытесняется */
+	const MAX_INSTANCES = 200;
 
 	protected $services = [
 		'account',
@@ -239,6 +242,49 @@ class ApiClient
 	}
 
 	/**
+	 * Ключ экземпляра: один client_id обслуживает много аккаунтов,
+	 * поэтому экземпляры различаются по домену
+	 * @param string $client_id
+	 * @param string $domain
+	 * @return string
+	 */
+	public static function instanceKey($client_id, $domain = '')
+	{
+		return $client_id . ':' . $domain;
+	}
+
+	/**
+	 * Get instance key
+	 * @return string
+	 */
+	public function getKey()
+	{
+		return static::instanceKey($this->_integration['client_id'], $this->_integration['domain']);
+	}
+
+	/**
+	 * Разрешить ключ: составной как есть, голый client_id — если он один
+	 * @param string $key
+	 * @return string|null
+	 */
+	protected static function resolveKey($key)
+	{
+		if (isset(static::$_instances[$key])) {
+			return $key;
+		}
+		if (strpos($key, ':') !== false) {
+			return null;
+		}
+		$found = [];
+		foreach (array_keys(static::$_instances) as $existing) {
+			if (strpos($existing, $key . ':') === 0) {
+				$found[] = $existing;
+			}
+		}
+		return count($found) === 1 ? $found[0] : null;
+	}
+
+	/**
 	 * Set client instance
 	 * @param array $data
 	 * @return ApiClient
@@ -260,49 +306,61 @@ class ApiClient
 		}
 		$instance = new static($account);
 		$instance->setParam('user_agent', 'Amoapi v4 (' . $account['client_id'] . ')');
-		static::$_instances[$account['client_id']] = $instance;
-		static::$_callbacks[$account['client_id']] = new Api\Callbacks($instance);
-		static::$_oauth[$account['client_id']] = new Api\Oauth($instance);
-		static::$_cache[$account['client_id']] = new Api\Cache($instance);
-		static::$_queries[$account['client_id']] = new Api\Queries();
-		static::$_queries[$account['client_id']]->boot($instance);
+		$key = $instance->getKey();
+		// повторная регистрация того же ключа переносит его в конец (LRU)
+		static::removeInstance($key);
+		while (count(static::$_instances) >= static::MAX_INSTANCES) {
+			static::removeInstance(array_key_first(static::$_instances));
+		}
+		static::$_instances[$key] = $instance;
+		static::$_callbacks[$key] = new Api\Callbacks($instance);
+		static::$_oauth[$key] = new Api\Oauth($instance);
+		static::$_cache[$key] = new Api\Cache($instance);
+		static::$_queries[$key] = new Api\Queries();
+		static::$_queries[$key]->boot($instance);
 		return $instance;
 	}
 
 	/**
 	 * Get client instance
-	 * @param string $client_id
+	 * @param string $key - client_id:domain или уникальный client_id
 	 * @return ApiClient
 	 */
-	public static function getInstance($client_id)
+	public static function getInstance($key)
 	{
-		if (!isset(static::$_instances[$client_id])) {
-			throw new \Exception('Account not found: ' . $client_id);
+		if (!$resolved = static::resolveKey($key)) {
+			throw new \Exception('Account not found: ' . $key);
 		}
-		return static::$_instances[$client_id];
+		return static::$_instances[$resolved];
 	}
 
 	/**
 	 * Has client isset
-	 * @param string $client_id
+	 * @param string $key - client_id:domain или уникальный client_id
 	 * @return bool
 	 */
-	public static function hasInstance($client_id)
+	public static function hasInstance($key)
 	{
-		return isset(static::$_instances[$client_id]);
+		return static::resolveKey($key) !== null;
 	}
 
 	/**
 	 * Remove client isset
-	 * @param string $client_id
+	 * @param string $key - client_id:domain или уникальный client_id
 	 * @return void
 	 */
-	public static function removeInstance($client_id)
+	public static function removeInstance($key)
 	{
-		if (isset(static::$_instances[$client_id])) {
-			static::$_instances[$client_id] = null;
+		if (!$resolved = static::resolveKey($key)) {
+			return;
 		}
-		unset(static::$_instances[$client_id]);
+		unset(
+			static::$_instances[$resolved],
+			static::$_callbacks[$resolved],
+			static::$_oauth[$resolved],
+			static::$_cache[$resolved],
+			static::$_queries[$resolved]
+		);
 	}
 
 	/**
@@ -326,15 +384,17 @@ class ApiClient
 	public function __get($target)
 	{
 		if ($target === 'queries') {
-			return static::$_queries[$this->getIntegration('id')];
+			return static::$_queries[$this->getKey()];
 		} else if ($target === 'callbacks') {
-			return static::$_callbacks[$this->getIntegration('id')];
+			return static::$_callbacks[$this->getKey()];
 		} else if ($target === 'oauth') {
-			return static::$_oauth[$this->getIntegration('id')];
+			return static::$_oauth[$this->getKey()];
 		} else if ($target === 'cache') {
-			return static::$_cache[$this->getIntegration('id')];
+			return static::$_cache[$this->getKey()];
 		} else if ($target === 'client_id') {
 			return $this->getIntegration('client_id');
+		} else if ($target === 'instance_key') {
+			return $this->getKey();
 		} else if (in_array($target, $this->services)) {
 			$service_class = '\\Ufee\\AmoV4\\Services\\' . ucfirst($target);
 			return (new $service_class($this))->get();

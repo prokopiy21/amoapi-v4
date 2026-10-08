@@ -32,6 +32,7 @@ class Query
 	],
 	$hidden = [
 		'client_id',
+		'instance_key',
 		'service',
 		'curl',
 		'response'
@@ -52,6 +53,7 @@ class Query
 			$this->attributes[$field_key] = null;
 		}
 		$this->attributes['client_id'] = $instance->getIntegration('client_id');
+		$this->attributes['instance_key'] = $instance->getKey();
 		$this->attributes['service'] = $service_class;
 		$this->attributes['retry'] = true;
 		$this->attributes['retries'] = 0;
@@ -569,7 +571,7 @@ class Query
 	public function __get($field)
 	{
 		if ($field === 'instance') {
-			return ApiClient::getInstance($this->client_id);
+			return ApiClient::getInstance($this->instance_key);
 		}
 		if (!array_key_exists($field, $this->attributes)) {
 			throw new \Exception('Invalid Query field: ' . $field);

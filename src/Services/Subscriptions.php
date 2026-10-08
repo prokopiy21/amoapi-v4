@@ -21,6 +21,7 @@ class Subscriptions extends Service
 	public function __construct(ApiClient $client, array $args)
 	{
 		$this->client_id = $client->client_id;
+		$this->instance_key = $client->getKey();
 
 		if (count($args) < 2) {
 			throw new \InvalidArgumentException('Subscriptions Service required entity_type and entity_id arguments');

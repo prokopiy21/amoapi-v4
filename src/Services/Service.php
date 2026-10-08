@@ -23,6 +23,7 @@ class Service
 {
 	protected static $_service_instances = [];
 	protected $client_id;
+	protected $instance_key;
 
 	protected $api_path = '/api/v4/{entity}';
 	protected $entity_key = '{entities}';
@@ -42,6 +43,7 @@ class Service
 	public function __construct(ApiClient $client)
 	{
 		$this->client_id = $client->client_id;
+		$this->instance_key = $client->getKey();
 		$this->_boot();
 	}
 
@@ -318,7 +320,7 @@ class Service
 	public function __get($target)
 	{
 		if ($target === 'instance') {
-			return ApiClient::getInstance($this->client_id);
+			return ApiClient::getInstance($this->instance_key);
 		} else if (!isset($this->{$target})) {
 			throw new \Exception('Invalid Service field: ' . $target);
 		}

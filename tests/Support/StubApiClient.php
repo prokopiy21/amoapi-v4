@@ -22,7 +22,7 @@ class StubApiClient extends ApiClient
 	public $queryClass = StubQuery::class;
 
 	/**
-	 * Подменяет зарегистрированный ApiClient на stub с тем же client_id.
+	 * Подменяет зарегистрированный ApiClient на stub с тем же ключом экземпляра.
 	 */
 	public static function hijack(ApiClient $real): self
 	{
@@ -39,7 +39,7 @@ class StubApiClient extends ApiClient
 		$instances = $ref->getProperty('_instances');
 		$instances->setAccessible(true);
 		$all = $instances->getValue(null);
-		$all[$real->getIntegration('client_id')] = $stub;
+		$all[$real->getKey()] = $stub;
 		$instances->setValue(null, $all);
 
 		return $stub;
